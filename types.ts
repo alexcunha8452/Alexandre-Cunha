@@ -1,0 +1,107 @@
+export enum VehicleType {
+  MUNCK = 'Caminhão Munck',
+  GUINDASTE = 'Guindaste',
+  CARRETA = 'Carreta',
+  PRANCHA = 'Prancha',
+  PTA = 'PTA',
+  OUTRO = 'Outro'
+}
+
+export enum VehicleStatus {
+  OPERANDO = 'Operando',
+  PARADO = 'Parado',
+  MANUTENCAO = 'Em Manutenção',
+  RESERVADO = 'Reservado'
+}
+
+export enum MaintenanceType {
+  CORRETIVA = 'Corretiva',
+  PREVENTIVA = 'Preventiva',
+  PROGRAMADA = 'Programada'
+}
+
+export enum ContractType {
+  DIARIA = 'Diária',
+  MENSAL = 'Mensal'
+}
+
+export interface Vehicle {
+  id: string;
+  code: string;
+  type: VehicleType;
+  brand: string;
+  model: string;
+  year: number;
+  plate: string;
+  chassis: string;
+  capacity: string;
+  status: VehicleStatus;
+  defaultDailyRate: number;
+  defaultMonthlyRate: number;
+  isActive: boolean;
+}
+
+export interface MaintenanceItem {
+  id: string;
+  type: 'Labor' | 'Part';
+  description: string;
+  quantity: number;
+  unitValue: number;
+  totalValue: number;
+}
+
+export interface Maintenance {
+  id: string;
+  vehicleId: string;
+  type: MaintenanceType;
+  startDate: string; // ISO Date
+  endDate?: string; // ISO Date
+  horometer: number;
+  laborCost: number;
+  partsCost: number;
+  totalCost: number;
+  description: string;
+  items: MaintenanceItem[];
+}
+
+export interface FuelEntry {
+  id: string;
+  vehicleId: string;
+  date: string;
+  fuelType: string;
+  liters: number;
+  pricePerLiter: number;
+  totalValue: number;
+  odometer: number;
+  supplier: string;
+  paymentMethod: string;
+}
+
+export interface GeneralExpense {
+  id: string;
+  vehicleId?: string; // Optional linkage
+  date: string;
+  category: string;
+  description: string;
+  value: number;
+}
+
+export interface Contract {
+  id: string;
+  clientName: string;
+  vehicleId: string;
+  type: ContractType;
+  startDate: string;
+  endDate?: string; // If undefined, it is "Em Andamento"
+  dailyRate: number;
+  monthlyRate: number;
+  status: 'Active' | 'Finished';
+}
+
+export interface FinancialSummary {
+  revenue: number;
+  expenses: number;
+  netProfit: number;
+  periodStart: string;
+  periodEnd: string;
+}
