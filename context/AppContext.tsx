@@ -1,10 +1,9 @@
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { 
   Vehicle, Maintenance, FuelEntry, GeneralExpense, Contract, 
-  VehicleType, VehicleStatus, ContractType, MaintenanceType, MaintenanceItem 
+  VehicleType, VehicleStatus, MaintenanceType 
 } from '../types';
-import { v4 as uuidv4 } from 'uuid'; // We will simulate uuid with a simple math random for this demo if needed, but lets try to allow uuid import or mock it.
-// Since I cannot install packages, I will use a helper for ID.
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -18,7 +17,7 @@ interface AppContextType {
   // Actions
   addVehicle: (v: Omit<Vehicle, 'id' | 'isActive'>) => void;
   updateVehicle: (id: string, v: Partial<Vehicle>) => void;
-  deleteVehicle: (id: string) => void; // Soft delete
+  deleteVehicle: (id: string) => void; 
 
   addMaintenance: (m: Omit<Maintenance, 'id' | 'totalCost'>) => void;
   deleteMaintenance: (id: string) => void;
@@ -30,13 +29,13 @@ interface AppContextType {
   deleteExpense: (id: string) => void;
 
   addContract: (c: Omit<Contract, 'id' | 'status'>) => void;
-  endContract: (id: string, endDate: string) => void;
+  updateContract: (id: string, data: Partial<Contract>) => void;
   deleteContract: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Real Data Initialization from Documents
+// --- Real Data Initialization (Default fallback if LocalStorage is empty) ---
 const initialVehicles: Vehicle[] = [
   // --- GUINDASTES ---
   {
@@ -103,21 +102,45 @@ const initialVehicles: Vehicle[] = [
   }
 ];
 
-const initialContracts: Contract[] = [];
-const initialMaintenances: Maintenance[] = [];
+// --- Helper for LocalStorage ---
+const getLocalStorage = <T,>(key: string, initial: T): T => {
+  try {
+    const item = window.localStorage.getItem(key);
+    return item ? JSON.parse(item) : initial;
+  } catch (error) {
+    console.error(`Error reading ${key} from localStorage`, error);
+    return initial;
+  }
+};
+
+const setLocalStorage = (key: string, value: any) => {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.error(`Error saving ${key} to localStorage`, error);
+  }
+};
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [vehicles, setVehicles] = useState<Vehicle[]>(initialVehicles);
-  const [maintenances, setMaintenances] = useState<Maintenance[]>(initialMaintenances);
-  const [fuels, setFuels] = useState<FuelEntry[]>([]);
-  const [expenses, setExpenses] = useState<GeneralExpense[]>([]);
-  const [contracts, setContracts] = useState<Contract[]>(initialContracts);
+  // Initialize State from LocalStorage or Default
+  const [vehicles, setVehicles] = useState<Vehicle[]>(() => getLocalStorage('vehicles', initialVehicles));
+  const [maintenances, setMaintenances] = useState<Maintenance[]>(() => getLocalStorage('maintenances', []));
+  const [fuels, setFuels] = useState<FuelEntry[]>(() => getLocalStorage('fuels', []));
+  const [expenses, setExpenses] = useState<GeneralExpense[]>(() => getLocalStorage('expenses', []));
+  const [contracts, setContracts] = useState<Contract[]>(() => getLocalStorage('contracts', []));
+
+  // --- Effects to Save Changes ---
+  useEffect(() => setLocalStorage('vehicles', vehicles), [vehicles]);
+  useEffect(() => setLocalStorage('maintenances', maintenances), [maintenances]);
+  useEffect(() => setLocalStorage('fuels', fuels), [fuels]);
+  useEffect(() => setLocalStorage('expenses', expenses), [expenses]);
+  useEffect(() => setLocalStorage('contracts', contracts), [contracts]);
 
   // --- Actions ---
 
   const addVehicle = (data: Omit<Vehicle, 'id' | 'isActive'>) => {
     const newVehicle: Vehicle = { ...data, id: generateId(), isActive: true };
-    setVehicles([...vehicles, newVehicle]);
+    setVehicles(prev => [...prev, newVehicle]);
   };
 
   const updateVehicle = (id: string, data: Partial<Vehicle>) => {
@@ -125,16 +148,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteVehicle = (id: string) => {
-    // Soft delete
     updateVehicle(id, { isActive: false });
   };
 
   const addMaintenance = (data: Omit<Maintenance, 'id' | 'totalCost'>) => {
     const totalCost = data.laborCost + data.partsCost;
     const newM: Maintenance = { ...data, id: generateId(), totalCost };
-    setMaintenances([...maintenances, newM]);
+    setMaintenances(prev => [...prev, newM]);
     
-    // Update vehicle status
+    // Se não tem data fim, coloca em manutenção. Se tem, já foi feita, libera veículo.
     if (!data.endDate) {
       updateVehicle(data.vehicleId, { status: VehicleStatus.MANUTENCAO });
     } else {
@@ -148,7 +170,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const addFuel = (data: Omit<FuelEntry, 'id' | 'totalValue'>) => {
     const totalValue = data.liters * data.pricePerLiter;
-    setFuels([...fuels, { ...data, id: generateId(), totalValue }]);
+    setFuels(prev => [...prev, { ...data, id: generateId(), totalValue }]);
   };
 
   const deleteFuel = (id: string) => {
@@ -156,7 +178,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addExpense = (data: Omit<GeneralExpense, 'id'>) => {
-    setExpenses([...expenses, { ...data, id: generateId() }]);
+    setExpenses(prev => [...prev, { ...data, id: generateId() }]);
   };
 
   const deleteExpense = (id: string) => {
@@ -164,26 +186,45 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addContract = (data: Omit<Contract, 'id' | 'status'>) => {
-    setContracts([...contracts, { ...data, id: generateId(), status: 'Active' }]);
-    // Set vehicle to Operando or Reservado?
-    updateVehicle(data.vehicleId, { status: VehicleStatus.OPERANDO });
-  };
-
-  const endContract = (id: string, endDate: string) => {
-    setContracts(prev => prev.map(c => {
-      if (c.id === id) {
-        return { ...c, endDate, status: 'Finished' };
-      }
-      return c;
-    }));
-    // We might want to set vehicle to Parado, but we need to know which vehicle.
-    const contract = contracts.find(c => c.id === id);
-    if(contract) {
-        updateVehicle(contract.vehicleId, { status: VehicleStatus.PARADO });
+    // Se a data de fim já foi preenchida, o contrato nasce finalizado
+    const isFinished = !!data.endDate;
+    const status = isFinished ? 'Finished' : 'Active';
+    
+    setContracts(prev => [...prev, { ...data, id: generateId(), status }]);
+    
+    // Se finalizado, libera máquina. Se não, ocupa.
+    if (isFinished) {
+        updateVehicle(data.vehicleId, { status: VehicleStatus.PARADO });
+    } else {
+        updateVehicle(data.vehicleId, { status: VehicleStatus.OPERANDO });
     }
   };
 
+  const updateContract = (id: string, data: Partial<Contract>) => {
+    setContracts(prev => prev.map(c => {
+        if (c.id === id) {
+            // Verifica se o status mudou baseado na presença de endDate
+            const updatedContract = { ...c, ...data };
+            
+            // Lógica inteligente de status do contrato
+            if (updatedContract.endDate) {
+                updatedContract.status = 'Finished';
+                // Libera o veículo
+                updateVehicle(updatedContract.vehicleId, { status: VehicleStatus.PARADO });
+            } else {
+                updatedContract.status = 'Active';
+                // Ocupa o veículo
+                updateVehicle(updatedContract.vehicleId, { status: VehicleStatus.OPERANDO });
+            }
+            return updatedContract;
+        }
+        return c;
+    }));
+  };
+
   const deleteContract = (id: string) => {
+    // Antes de deletar, talvez devêssemos liberar o veículo? 
+    // Por segurança, vamos apenas deletar o registro histórico. O usuário gerencia o status do veículo manualmente se precisar.
     setContracts(prev => prev.filter(c => c.id !== id));
   };
 
@@ -194,7 +235,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       addMaintenance, deleteMaintenance,
       addFuel, deleteFuel,
       addExpense, deleteExpense,
-      addContract, endContract, deleteContract
+      addContract, updateContract, deleteContract
     }}>
       {children}
     </AppContext.Provider>

@@ -1,39 +1,50 @@
+
 import { Contract, ContractType, Maintenance, FuelEntry, GeneralExpense } from '../types';
-import { differenceInDays, endOfMonth, startOfMonth, isWithinInterval, parseISO, getDaysInMonth, isSameMonth, max, min, isAfter, isBefore } from 'date-fns';
+import { differenceInDays, getDaysInMonth, isWithinInterval, parseISO, max, min, isAfter } from 'date-fns';
 
 /**
  * Calculates revenue for a specific contract within a target period (usually a specific month).
  */
 export const calculateContractRevenue = (contract: Contract, periodStart: Date, periodEnd: Date): number => {
   const contractStart = parseISO(contract.startDate);
-  const contractEnd = contract.endDate ? parseISO(contract.endDate) : new Date(); // If ongoing, assume "up to now" or end of period depending on context
+  // Se estiver em andamento, assumimos o fim do período de análise como teto para cálculo
+  const contractEnd = contract.endDate ? parseISO(contract.endDate) : periodEnd; 
   
   // Intersection of [contractStart, contractEnd] and [periodStart, periodEnd]
   const effectiveStart = max([contractStart, periodStart]);
   const effectiveEnd = min([contractEnd, periodEnd]);
 
-  if (isAfter(effectiveStart, effectiveEnd)) {
-    return 0; // No overlap
+  let revenue = 0;
+
+  // Verifica se há sobreposição de datas
+  if (!isAfter(effectiveStart, effectiveEnd)) {
+    const daysOverlap = differenceInDays(effectiveEnd, effectiveStart) + 1;
+
+    if (daysOverlap > 0) {
+      if (contract.type === ContractType.DIARIA) {
+        revenue = daysOverlap * contract.dailyRate;
+      } else {
+        // Monthly Calculation (Pro-rata)
+        // Rule: Daily Value = Monthly Value / Days in that specific month
+        // Simpificação: Considerando o mês do periodStart para cálculo pro-rata
+        const daysInMonth = getDaysInMonth(periodStart);
+        const dailyRateProRata = contract.monthlyRate / daysInMonth;
+        
+        revenue = daysOverlap * dailyRateProRata;
+      }
+    }
   }
 
-  const daysOverlap = differenceInDays(effectiveEnd, effectiveStart) + 1;
-
-  if (contract.type === ContractType.DIARIA) {
-    return daysOverlap * contract.dailyRate;
-  } else {
-    // Monthly Calculation (Pro-rata)
-    // Rule: Daily Value = Monthly Value / Days in that specific month
-    let totalRevenue = 0;
-    
-    // We iterate day by day or simplify by month chunk for the period
-    // For simplicity in this demo, let's look at the specific month of periodStart
-    // Assuming the report is usually run per month.
-    
-    const daysInMonth = getDaysInMonth(periodStart);
-    const dailyRateProRata = contract.monthlyRate / daysInMonth;
-    
-    return daysOverlap * dailyRateProRata;
+  // Adicionar valor de Desmobilização
+  // Regra: A desmobilização é somada se a data de fim do contrato (se existir) cair DENTRO deste período.
+  if (contract.demobilization && contract.endDate) {
+    const demobDate = parseISO(contract.endDate);
+    if (isWithinInterval(demobDate, { start: periodStart, end: periodEnd })) {
+      revenue += contract.demobilization.totalValue;
+    }
   }
+
+  return revenue;
 };
 
 export const calculateTotalRevenue = (contracts: Contract[], start: Date, end: Date): number => {

@@ -1,3 +1,4 @@
+
 export enum VehicleType {
   MUNCK = 'Caminhão Munck',
   GUINDASTE = 'Guindaste',
@@ -86,6 +87,12 @@ export interface GeneralExpense {
   value: number;
 }
 
+export interface DemobilizationData {
+  distance: number;
+  pricePerKm: number;
+  totalValue: number;
+}
+
 export interface Contract {
   id: string;
   clientName: string;
@@ -95,6 +102,10 @@ export interface Contract {
   endDate?: string; // If undefined, it is "Em Andamento"
   dailyRate: number;
   monthlyRate: number;
+  
+  // New Demobilization Fields
+  demobilization?: DemobilizationData;
+
   status: 'Active' | 'Finished';
 }
 
