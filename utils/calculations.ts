@@ -1,100 +1,109 @@
 
 import { Contract, ContractType, Maintenance, FuelEntry, GeneralExpense } from '../types';
-import { differenceInDays, getDaysInMonth, isWithinInterval, parseISO, max, min, isAfter, eachDayOfInterval, getDay } from 'date-fns';
+import { differenceInDays, getDaysInMonth, isWithinInterval, parseISO, max, min, isAfter, eachDayOfInterval, getDay, format, startOfDay, endOfDay } from 'date-fns';
 
 /**
- * Calculates revenue for a specific contract within a target period (usually a specific month).
+ * Calculates revenue for a specific contract within a target period.
+ * IMPORTANT: Logic updated to accumulate value day-by-day up to TODAY for active contracts.
  */
 export const calculateContractRevenue = (contract: Contract, periodStart: Date, periodEnd: Date): number => {
   const contractStart = parseISO(contract.startDate);
-  // Se estiver em andamento, assumimos o fim do período de análise como teto para cálculo
-  const contractEnd = contract.endDate ? parseISO(contract.endDate) : periodEnd; 
+  // Se não tiver data fim, o teto teórico é infinito, mas na prática limitamos ao fim do período analisado
+  const contractEndRaw = contract.endDate ? parseISO(contract.endDate) : null;
   
-  // Intersection of [contractStart, contractEnd] and [periodStart, periodEnd]
+  // Limitação "Até a data atual":
+  // Se estamos olhando para o mês atual, não queremos projetar o futuro, queremos o realizado até hoje.
+  const today = endOfDay(new Date()); // Considera até o fim de hoje
+  
+  // O fim efetivo do cálculo é o menor valor entre:
+  // 1. O fim do contrato (se houver)
+  // 2. O fim do período selecionado (ex: dia 31 do mês)
+  // 3. Hoje (para não calcular dias futuros ainda não trabalhados)
+  
+  let effectiveEndCalc = periodEnd;
+  
+  // Se o período de análise inclui o futuro (ex: selecionou este mês inteiro), limitamos a "Hoje".
+  // Mas apenas se o contrato ainda estiver ativo (sem endDate) ou se o endDate for no futuro.
+  if (isAfter(periodEnd, today)) {
+      effectiveEndCalc = min([periodEnd, today]);
+  }
+  
+  if (contractEndRaw) {
+      effectiveEndCalc = min([effectiveEndCalc, contractEndRaw]);
+  }
+
+  // Intersection of [contractStart, effectiveEndCalc] and [periodStart, periodEnd]
+  // Precisamos garantir que a janela de cálculo esteja dentro da janela do contrato E dentro da janela do período
   const effectiveStart = max([contractStart, periodStart]);
-  const effectiveEnd = min([contractEnd, periodEnd]);
+  const effectiveEnd = min([effectiveEndCalc, periodEnd]); // Redundante mas seguro
+
+  // Se o inicio efetivo for depois do fim efetivo, não há receita neste período/intervalo
+  if (isAfter(effectiveStart, effectiveEnd)) {
+      return 0;
+  }
 
   let revenue = 0;
+  let billableDaysCount = 0;
 
-  // Verifica se há sobreposição de datas
-  if (!isAfter(effectiveStart, effectiveEnd)) {
-    
-    // Gerar todos os dias no intervalo e filtrar pelos dias trabalhados configurados
-    const daysInterval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
-    
-    // Filtra apenas os dias da semana permitidos (ex: remove domingos se não estiverem em workingDays)
-    // Se workingDays for undefined (contratos antigos), assume todos (0-6)
-    const allowedDays = contract.workingDays || [0, 1, 2, 3, 4, 5, 6];
-    
-    const billableDaysCount = daysInterval.filter(day => allowedDays.includes(getDay(day))).length;
+  // Gerar todos os dias no intervalo efetivo
+  const daysInterval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
+  
+  // Padrão Base (Se undefined, assume todos)
+  const baseAllowedDays = contract.workingDays || [0, 1, 2, 3, 4, 5, 6];
+  const excludedSet = new Set(contract.excludedDates || []);
+  const includedSet = new Set(contract.includedDates || []);
 
-    // Aplicar desconto manual (Feriados/Chuva)
-    // Nota: O desconto manual é aplicado proporcionalmente se o contrato for longo, 
-    // mas aqui aplicamos direto se houver dias suficientes no periodo.
-    // Para simplificar: Subtrai do total calculado se for o mês final ou se for curto.
-    // Melhor abordagem segura: O desconto manual é um "total global". 
-    // Se o contrato for mensal, é difícil saber em qual mês descontar.
-    // Vamos assumir que o cálculo é bruto por dias úteis no período.
-    
-    // Logica simplificada para exibição mensal:
-    // Consideramos apenas dias úteis reais encontrados no intervalo.
-    
-    let finalBillableDays = billableDaysCount;
-    
-    // Se for o mês exato de encerramento ou contrato curto, podemos tentar aplicar o desconto manual visualmente
-    // Mas para consistência matemática no dashboard, usamos os dias calculados.
-    // O desconto manual (manualDeductionDays) é usado principalmente no fechamento final.
-    
-    if (finalBillableDays > 0) {
-      if (contract.type === ContractType.DIARIA) {
-        revenue = finalBillableDays * contract.dailyRate;
-      } else {
-        // Monthly Calculation
-        // Se o usuário selecionou dias específicos, o mensal vira um "Pro-Rata baseados em dias úteis"
-        // Ou seja: (Valor Mensal / Dias Úteis Totais do Mês) * Dias Trabalhados
-        
-        const startOfMonthDate = new Date(periodStart.getFullYear(), periodStart.getMonth(), 1);
-        const endOfMonthDate = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 0);
-        
-        const allDaysInMonth = eachDayOfInterval({ start: startOfMonthDate, end: endOfMonthDate });
-        const workingDaysInMonth = allDaysInMonth.filter(day => allowedDays.includes(getDay(day))).length;
-        
-        // Evita divisão por zero
-        const effectiveDivisor = workingDaysInMonth > 0 ? workingDaysInMonth : 30;
-        const dailyRateProRata = contract.monthlyRate / effectiveDivisor;
-        
-        revenue = finalBillableDays * dailyRateProRata;
+  daysInterval.forEach(day => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const dayOfWeek = getDay(day);
+
+      let isBillable = false;
+
+      // 1. Verifica se foi forçado manualmente (Inclusão)
+      if (includedSet.has(dateStr)) {
+          isBillable = true;
+      } 
+      // 2. Verifica se foi forçado manualmente (Exclusão)
+      else if (excludedSet.has(dateStr)) {
+          isBillable = false;
       }
+      // 3. Aplica regra base
+      else if (baseAllowedDays.includes(dayOfWeek)) {
+          isBillable = true;
+      }
+
+      if (isBillable) {
+          billableDaysCount++;
+      }
+  });
+
+  // Cálculo Financeiro
+  if (billableDaysCount > 0) {
+    if (contract.type === ContractType.DIARIA) {
+      revenue = billableDaysCount * contract.dailyRate;
+    } else {
+      // Cálculo Mensal Proporcional
+      // Regra: Valor Mensal / Dias Totais do Mês * Dias Trabalhados
+      // Isso é mais justo para contratos quebrados
+      
+      const startOfMonthDate = new Date(periodStart.getFullYear(), periodStart.getMonth(), 1);
+      const daysInMonth = getDaysInMonth(startOfMonthDate);
+      
+      const dailyRateProRata = contract.monthlyRate / daysInMonth;
+      
+      revenue = billableDaysCount * dailyRateProRata;
     }
   }
 
-  // Adicionar valor de Desmobilização
+  // Adicionar valor de Desmobilização (Apenas se a data de fim cair neste intervalo exato)
   if (contract.demobilization && contract.endDate) {
     const demobDate = parseISO(contract.endDate);
-    if (isWithinInterval(demobDate, { start: periodStart, end: periodEnd })) {
+    if (isWithinInterval(demobDate, { start: effectiveStart, end: effectiveEnd })) {
       revenue += contract.demobilization.totalValue;
     }
   }
-  
-  // Subtração de dias manuais (Apenas se o contrato terminar neste período para abater do valor final)
-  // Isso é uma regra de negócio: Descontos manuais (chuva) são abatidos no acerto final?
-  // Vamos assumir que sim, para não ficar negativo em meses anteriores.
-  if (contract.manualDeductionDays > 0 && contract.endDate) {
-      const endDate = parseISO(contract.endDate);
-      if (isWithinInterval(endDate, { start: periodStart, end: periodEnd })) {
-          // Calcula valor do dia para descontar
-          let deductionValue = 0;
-          if (contract.type === ContractType.DIARIA) {
-              deductionValue = contract.manualDeductionDays * contract.dailyRate;
-          } else {
-              // Pro-rata médio
-              deductionValue = contract.manualDeductionDays * (contract.monthlyRate / 30);
-          }
-          revenue -= deductionValue;
-      }
-  }
 
-  return Math.max(0, revenue); // Nunca retorna negativo
+  return Math.max(0, revenue);
 };
 
 export const calculateTotalRevenue = (contracts: Contract[], start: Date, end: Date): number => {

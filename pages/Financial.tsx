@@ -3,8 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Contract, ContractType } from '../types';
 import { calculateContractRevenue } from '../utils/calculations';
-import { Plus, CheckCircle, XCircle, DollarSign, Calendar, RefreshCcw, Truck, Edit, Info } from 'lucide-react';
-import { startOfMonth, endOfMonth, format, eachDayOfInterval, parseISO, getDay } from 'date-fns';
+import { Plus, CheckCircle, XCircle, DollarSign, Calendar as CalendarIcon, RefreshCcw, Truck, Edit, Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { startOfMonth, endOfMonth, format, eachDayOfInterval, parseISO, getDay, addMonths, subMonths, isSameMonth, isSameDay, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 const Financial: React.FC = () => {
   const { contracts, vehicles, addContract, updateContract, deleteContract } = useApp();
@@ -24,6 +25,8 @@ const Financial: React.FC = () => {
     monthlyRate: 0,
     workingDays: [1, 2, 3, 4, 5, 6], // Default: Seg-Sab (Sem Domingo)
     manualDeductionDays: 0,
+    excludedDates: [],
+    includedDates: [],
     demobilization: {
         distance: 0,
         pricePerKm: 0,
@@ -36,8 +39,8 @@ const Financial: React.FC = () => {
   const [demobPrice, setDemobPrice] = useState(0);
   const [formData, setFormData] = useState<Partial<Contract>>(initialFormState);
   
-  // Preview Calculation State
-  const [previewTotalDays, setPreviewTotalDays] = useState(0);
+  // Calendar View State inside Modal
+  const [calendarViewDate, setCalendarViewDate] = useState(new Date());
 
   // Helper para exibir data sem timezone offset
   const formatDateDisplay = (isoDateString: string) => {
@@ -45,29 +48,6 @@ const Financial: React.FC = () => {
       const [year, month, day] = isoDateString.split('-');
       return `${day}/${month}/${year}`;
   };
-
-  // Efeito para calcular dias totais em tempo real no formulário
-  useEffect(() => {
-     if (formData.startDate && formData.endDate && !isIndefinite) {
-         try {
-             const start = parseISO(formData.startDate);
-             const end = parseISO(formData.endDate);
-             if (start <= end) {
-                 const days = eachDayOfInterval({ start, end });
-                 const allowed = formData.workingDays || [0,1,2,3,4,5,6];
-                 const count = days.filter(d => allowed.includes(getDay(d))).length;
-                 const final = Math.max(0, count - (formData.manualDeductionDays || 0));
-                 setPreviewTotalDays(final);
-             } else {
-                 setPreviewTotalDays(0);
-             }
-         } catch (e) {
-             setPreviewTotalDays(0);
-         }
-     } else {
-         setPreviewTotalDays(0);
-     }
-  }, [formData.startDate, formData.endDate, formData.workingDays, formData.manualDeductionDays, isIndefinite]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +85,9 @@ const Financial: React.FC = () => {
           dailyRate: contract.dailyRate,
           monthlyRate: contract.monthlyRate,
           workingDays: contract.workingDays || [0,1,2,3,4,5,6],
-          manualDeductionDays: contract.manualDeductionDays || 0
+          manualDeductionDays: contract.manualDeductionDays || 0,
+          excludedDates: contract.excludedDates || [],
+          includedDates: contract.includedDates || []
       });
 
       if (contract.demobilization) {
@@ -117,6 +99,7 @@ const Financial: React.FC = () => {
       }
 
       setIsIndefinite(!contract.endDate);
+      setCalendarViewDate(parseISO(contract.startDate));
       setIsModalOpen(true);
   };
 
@@ -126,9 +109,12 @@ const Financial: React.FC = () => {
     setDemobPrice(0);
     setIsIndefinite(false);
     setEditingId(null);
+    setCalendarViewDate(new Date());
   }
 
-  const toggleDay = (dayIndex: number) => {
+  // --- Calendar Logic ---
+
+  const toggleDayBasePattern = (dayIndex: number) => {
       const current = formData.workingDays || [];
       if (current.includes(dayIndex)) {
           setFormData({ ...formData, workingDays: current.filter(d => d !== dayIndex) });
@@ -137,15 +123,104 @@ const Financial: React.FC = () => {
       }
   };
 
-  const weekDays = [
-      { idx: 1, label: 'S' }, // Seg
-      { idx: 2, label: 'T' },
-      { idx: 3, label: 'Q' },
-      { idx: 4, label: 'Q' },
-      { idx: 5, label: 'S' },
-      { idx: 6, label: 'S' }, // Sab
-      { idx: 0, label: 'D' }, // Dom
-  ];
+  const toggleSpecificDate = (date: Date) => {
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const dayOfWeek = getDay(date);
+      const isBaseIncluded = (formData.workingDays || []).includes(dayOfWeek);
+      
+      const excluded = new Set(formData.excludedDates || []);
+      const included = new Set(formData.includedDates || []);
+
+      if (isBaseIncluded) {
+          // Se está no padrão base, clicar significa EXCLUIR (feriado, folga)
+          if (excluded.has(dateStr)) {
+              excluded.delete(dateStr); // Remove a exclusão (volta a ser ativo)
+          } else {
+              excluded.add(dateStr); // Adiciona exclusão
+          }
+          // Garante que não está na lista de incluídos (limpeza)
+          included.delete(dateStr);
+      } else {
+          // Se NÃO está no padrão base (ex: Domingo), clicar significa INCLUIR (trabalho extra)
+          if (included.has(dateStr)) {
+              included.delete(dateStr); // Remove inclusão (volta a ser inativo)
+          } else {
+              included.add(dateStr); // Adiciona inclusão
+          }
+          // Garante que não está na lista de excluídos
+          excluded.delete(dateStr);
+      }
+
+      setFormData({
+          ...formData,
+          excludedDates: Array.from(excluded),
+          includedDates: Array.from(included)
+      });
+  };
+
+  const getDayStatus = (date: Date) => {
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const dayOfWeek = getDay(date);
+      const isBaseIncluded = (formData.workingDays || []).includes(dayOfWeek);
+      const isExcluded = (formData.excludedDates || []).includes(dateStr);
+      const isIncluded = (formData.includedDates || []).includes(dateStr);
+
+      if (isIncluded) return 'active-override'; // Verde (Extra)
+      if (isExcluded) return 'inactive-override'; // Cinza/Vermelho (Feriado)
+      return isBaseIncluded ? 'active-base' : 'inactive-base';
+  };
+
+  const renderCalendar = () => {
+      const monthStart = startOfMonth(calendarViewDate);
+      const monthEnd = endOfMonth(monthStart);
+      const startDateGrid = startOfWeek(monthStart);
+      const endDateGrid = endOfWeek(monthEnd);
+
+      const dateFormat = "d";
+      const rows = [];
+      let days = [];
+      let day = startDateGrid;
+      let formattedDate = "";
+
+      while (day <= endDateGrid) {
+          for (let i = 0; i < 7; i++) {
+              formattedDate = format(day, dateFormat);
+              const cloneDay = day;
+              
+              const status = getDayStatus(cloneDay);
+              let bgClass = "";
+              if (status === 'active-override') bgClass = "bg-green-600 text-white font-bold ring-2 ring-green-300";
+              else if (status === 'inactive-override') bgClass = "bg-red-100 text-red-400 line-through decoration-red-500";
+              else if (status === 'active-base') bgClass = "bg-brand-50 text-brand-700 font-medium border border-brand-200";
+              else bgClass = "bg-slate-50 text-slate-300";
+
+              if (!isSameMonth(day, monthStart)) {
+                  bgClass += " opacity-40";
+              }
+
+              days.push(
+                  <div
+                      key={day.toString()}
+                      className={`flex items-center justify-center p-2 cursor-pointer rounded-lg text-sm transition-all h-10 w-10 mx-auto select-none ${bgClass}`}
+                      onClick={() => toggleSpecificDate(cloneDay)}
+                  >
+                      {formattedDate}
+                  </div>
+              );
+              day = addDays(day, 1);
+          }
+          rows.push(
+              <div className="grid grid-cols-7 gap-1 mb-1" key={day.toString()}>
+                  {days}
+              </div>
+          );
+          days = [];
+      }
+      
+      return <div className="mt-2">{rows}</div>;
+  };
+
+  const weekDaysLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
   return (
     <div className="space-y-6">
@@ -191,7 +266,7 @@ const Financial: React.FC = () => {
                     <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4">
                             <p className="font-bold text-slate-800">{c.clientName}</p>
-                            <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Calendar className="w-3 h-3"/> {v?.code} - {v?.model}</p>
+                            <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><CalendarIcon className="w-3 h-3"/> {v?.code} - {v?.model}</p>
                         </td>
                         <td className="px-6 py-4 text-sm">
                             <span className={`px-2 py-0.5 rounded text-xs border ${c.type === ContractType.MENSAL ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>
@@ -227,6 +302,7 @@ const Financial: React.FC = () => {
                                 <DollarSign className="w-3 h-3" />
                                 {currentRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
+                            <p className="text-[10px] text-slate-400 mt-1">Acumulado até hoje</p>
                         </td>
                         <td className="px-6 py-4">
                             {c.status === 'Active' ? (
@@ -255,72 +331,92 @@ const Financial: React.FC = () => {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-             <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[95vh] overflow-y-auto">
+             <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center sticky top-0 z-10">
                <h2 className="text-xl font-bold text-slate-800">{editingId ? 'Editar Contrato' : 'Novo Contrato'}</h2>
                <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
              </div>
              <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Cliente</label>
-                    <input required type="text" placeholder="Nome da empresa ou cliente" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} />
-                </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Veículo</label>
-                    <select required className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500 bg-white" value={formData.vehicleId} onChange={e => {
-                        const vId = e.target.value;
-                        const v = vehicles.find(veh => veh.id === vId);
-                        setFormData({
-                            ...formData, 
-                            vehicleId: vId,
-                            dailyRate: v?.defaultDailyRate || 0,
-                            monthlyRate: v?.defaultMonthlyRate || 0
-                        });
-                    }}>
-                        <option value="">Selecione...</option>
-                        {vehicles.filter(v => v.isActive && (v.status !== 'Em Manutenção' || v.id === formData.vehicleId)).map(v => <option key={v.id} value={v.id}>{v.code} - {v.model}</option>)}
-                    </select>
-                </div>
-
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                        Dias de Faturamento (Seleção Manual)
-                        <div className="group relative">
-                             <Info className="w-4 h-4 text-slate-400 cursor-help" />
-                             <div className="absolute bottom-full mb-2 hidden group-hover:block w-48 bg-slate-800 text-white text-xs p-2 rounded z-10">
-                                 Selecione apenas os dias da semana que serão cobrados. Ex: Desmarque Domingo.
-                             </div>
-                        </div>
-                    </label>
-                    <div className="flex gap-2 justify-between">
-                        {weekDays.map(day => (
-                            <button
-                                key={day.idx}
-                                type="button"
-                                onClick={() => toggleDay(day.idx)}
-                                className={`w-10 h-10 rounded-lg text-sm font-bold transition-all ${
-                                    formData.workingDays?.includes(day.idx) 
-                                    ? 'bg-brand-600 text-white shadow-md' 
-                                    : 'bg-white text-slate-400 border border-slate-200'
-                                }`}
-                            >
-                                {day.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
+                
+                {/* Header Inputs */}
                 <div className="grid grid-cols-2 gap-4">
-                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Contrato</label>
-                        <select className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500 bg-white" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as ContractType})}>
-                            <option value={ContractType.MENSAL}>Mensal</option>
-                            <option value={ContractType.DIARIA}>Diária</option>
+                     <div className="col-span-2">
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Cliente</label>
+                        <input required type="text" placeholder="Nome da empresa ou cliente" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.clientName} onChange={e => setFormData({...formData, clientName: e.target.value})} />
+                     </div>
+                     <div className="col-span-2">
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Veículo</label>
+                        <select required className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500 bg-white" value={formData.vehicleId} onChange={e => {
+                            const vId = e.target.value;
+                            const v = vehicles.find(veh => veh.id === vId);
+                            setFormData({
+                                ...formData, 
+                                vehicleId: vId,
+                                dailyRate: v?.defaultDailyRate || 0,
+                                monthlyRate: v?.defaultMonthlyRate || 0
+                            });
+                        }}>
+                            <option value="">Selecione...</option>
+                            {vehicles.filter(v => v.isActive && (v.status !== 'Em Manutenção' || v.id === formData.vehicleId)).map(v => <option key={v.id} value={v.id}>{v.code} - {v.model}</option>)}
                         </select>
-                    </div>
-                    <div>
+                     </div>
+                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Data Início</label>
                         <input type="date" required className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} />
+                    </div>
+                    <div>
+                         <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Contrato</label>
+                         <select className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500 bg-white" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as ContractType})}>
+                             <option value={ContractType.MENSAL}>Mensal</option>
+                             <option value={ContractType.DIARIA}>Diária</option>
+                         </select>
+                     </div>
+                </div>
+
+                {/* Calendar & Working Days */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        Calendário de Trabalho
+                        <Info className="w-4 h-4 text-slate-400" />
+                    </label>
+                    
+                    {/* Pattern Selector */}
+                    <div className="flex gap-1 justify-between mb-4">
+                        {[1, 2, 3, 4, 5, 6, 0].map(dayIdx => {
+                             const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+                             return (
+                                <button
+                                    key={dayIdx}
+                                    type="button"
+                                    onClick={() => toggleDayBasePattern(dayIdx)}
+                                    className={`w-8 h-8 rounded text-xs font-bold transition-all ${
+                                        formData.workingDays?.includes(dayIdx) 
+                                        ? 'bg-brand-600 text-white shadow-md' 
+                                        : 'bg-white text-slate-400 border border-slate-200'
+                                    }`}
+                                >
+                                    {labels[dayIdx].substring(0,1)}
+                                </button>
+                             );
+                        })}
+                    </div>
+
+                    {/* Interactive Month Grid */}
+                    <div className="bg-white rounded-lg border border-slate-200 p-3">
+                         <div className="flex justify-between items-center mb-2">
+                             <button type="button" onClick={() => setCalendarViewDate(subMonths(calendarViewDate, 1))} className="p-1 hover:bg-slate-100 rounded"><ChevronLeft className="w-4 h-4"/></button>
+                             <span className="text-sm font-bold text-slate-700 capitalize">{format(calendarViewDate, 'MMMM yyyy', { locale: ptBR })}</span>
+                             <button type="button" onClick={() => setCalendarViewDate(addMonths(calendarViewDate, 1))} className="p-1 hover:bg-slate-100 rounded"><ChevronRight className="w-4 h-4"/></button>
+                         </div>
+                         <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 font-medium mb-1">
+                             {weekDaysLabels.map(d => <div key={d}>{d}</div>)}
+                         </div>
+                         {renderCalendar()}
+                         <div className="mt-2 flex gap-3 text-[10px] justify-center text-slate-500">
+                             <span className="flex items-center gap-1"><div className="w-2 h-2 bg-brand-50 border border-brand-200"></div> Padrão</span>
+                             <span className="flex items-center gap-1"><div className="w-2 h-2 bg-green-600"></div> Extra/Incluído</span>
+                             <span className="flex items-center gap-1"><div className="w-2 h-2 bg-red-100 decoration-red-500 line-through text-red-400">X</div> Feriado/Excluído</span>
+                         </div>
                     </div>
                 </div>
                 
@@ -346,17 +442,6 @@ const Financial: React.FC = () => {
                                  <label className="block text-xs font-medium text-slate-500 mb-1">Data de Término / Finalização</label>
                                  <input type="date" required={!isIndefinite} className="w-full border-slate-300 rounded-lg p-2 focus:ring-brand-500 focus:border-brand-500 text-sm" value={formData.endDate || ''} onChange={e => setFormData({...formData, endDate: e.target.value})} />
                              </div>
-                             
-                             <div className="flex gap-4 items-center">
-                                 <div className="flex-1">
-                                     <label className="block text-xs font-medium text-slate-500 mb-1">Subtrair Dias (Feriados/Chuva)</label>
-                                     <input type="number" min="0" className="w-full border-slate-300 rounded-lg p-2 text-sm" value={formData.manualDeductionDays} onChange={e => setFormData({...formData, manualDeductionDays: parseFloat(e.target.value) || 0})} />
-                                 </div>
-                                 <div className="flex-1 bg-white p-2 rounded border border-slate-200">
-                                     <span className="block text-xs text-slate-400">Total Dias Faturáveis</span>
-                                     <span className="block text-lg font-bold text-brand-600">{previewTotalDays} dias</span>
-                                 </div>
-                             </div>
                         </div>
                     )}
                 </div>
@@ -376,11 +461,6 @@ const Financial: React.FC = () => {
                          <input type="number" min="0" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={demobPrice} onChange={e => setDemobPrice(parseFloat(e.target.value) || 0)} />
                     </div>
                 </div>
-                {demobDistance > 0 && demobPrice > 0 && (
-                     <div className="text-right text-sm text-slate-600">
-                        Total Desmob: <span className="font-bold">R$ {(demobDistance * demobPrice).toLocaleString()}</span>
-                     </div>
-                )}
 
                 <hr className="border-slate-100"/>
 
@@ -388,7 +468,7 @@ const Financial: React.FC = () => {
                     <div>
                          <label className="block text-sm font-medium text-slate-700 mb-1">Valor Mensal (R$)</label>
                          <input type="number" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.monthlyRate} onChange={e => setFormData({...formData, monthlyRate: parseFloat(e.target.value)})} />
-                         <p className="text-xs text-slate-400 mt-1">O cálculo será proporcional aos dias úteis do mês.</p>
+                         <p className="text-xs text-slate-400 mt-1">O cálculo será acumulativo com base nos dias corridos até hoje.</p>
                     </div>
                 ) : (
                     <div>
@@ -397,7 +477,7 @@ const Financial: React.FC = () => {
                     </div>
                 )}
                 
-                <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-4">
+                <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-4 sticky bottom-0 bg-white z-10">
                     <button type="button" onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">Cancelar</button>
                     <button type="submit" className="px-5 py-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 font-medium shadow-md transition-colors">
                         {editingId ? 'Salvar Alterações' : 'Iniciar Contrato'}

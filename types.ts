@@ -104,8 +104,13 @@ export interface Contract {
   monthlyRate: number;
   
   // Configuração de Dias de Faturamento
-  workingDays: number[]; // Array de 0 a 6 (0=Domingo, 1=Segunda...)
-  manualDeductionDays: number; // Quantidade de dias a subtrair (Feriados, chuva, etc)
+  workingDays: number[]; // Array de 0 a 6 (0=Domingo, 1=Segunda...) -> Padrão base
+  
+  // Exceções Manuais (String YYYY-MM-DD)
+  excludedDates: string[]; // Dias que cairiam no workingDays mas não foram trabalhados (ex: Feriado Terça)
+  includedDates: string[]; // Dias que NÃO cairiam no workingDays mas foram trabalhados (ex: Domingo específico)
+
+  manualDeductionDays: number; // Quantidade de dias a subtrair (Legado/Extra)
 
   // New Demobilization Fields
   demobilization?: DemobilizationData;
