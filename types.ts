@@ -103,6 +103,10 @@ export interface Contract {
   dailyRate: number;
   monthlyRate: number;
   
+  // Configuração de Dias de Faturamento
+  workingDays: number[]; // Array de 0 a 6 (0=Domingo, 1=Segunda...)
+  manualDeductionDays: number; // Quantidade de dias a subtrair (Feriados, chuva, etc)
+
   // New Demobilization Fields
   demobilization?: DemobilizationData;
 

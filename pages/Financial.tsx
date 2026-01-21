@@ -1,10 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Contract, ContractType } from '../types';
 import { calculateContractRevenue } from '../utils/calculations';
-import { Plus, CheckCircle, XCircle, DollarSign, Calendar, RefreshCcw, Truck, Edit } from 'lucide-react';
-import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { Plus, CheckCircle, XCircle, DollarSign, Calendar, RefreshCcw, Truck, Edit, Info } from 'lucide-react';
+import { startOfMonth, endOfMonth, format, eachDayOfInterval, parseISO, getDay } from 'date-fns';
 
 const Financial: React.FC = () => {
   const { contracts, vehicles, addContract, updateContract, deleteContract } = useApp();
@@ -22,6 +22,8 @@ const Financial: React.FC = () => {
     startDate: format(new Date(), 'yyyy-MM-dd'), 
     dailyRate: 0, 
     monthlyRate: 0,
+    workingDays: [1, 2, 3, 4, 5, 6], // Default: Seg-Sab (Sem Domingo)
+    manualDeductionDays: 0,
     demobilization: {
         distance: 0,
         pricePerKm: 0,
@@ -29,18 +31,43 @@ const Financial: React.FC = () => {
     }
   };
 
-  // State separado para desmobilização no formulário
+  // State separado para desmobilização e dias
   const [demobDistance, setDemobDistance] = useState(0);
   const [demobPrice, setDemobPrice] = useState(0);
-
   const [formData, setFormData] = useState<Partial<Contract>>(initialFormState);
+  
+  // Preview Calculation State
+  const [previewTotalDays, setPreviewTotalDays] = useState(0);
 
-  // Helper para exibir data sem timezone offset (ex: 2023-10-15 exibe 15/10/2023)
+  // Helper para exibir data sem timezone offset
   const formatDateDisplay = (isoDateString: string) => {
       if (!isoDateString) return '';
       const [year, month, day] = isoDateString.split('-');
       return `${day}/${month}/${year}`;
   };
+
+  // Efeito para calcular dias totais em tempo real no formulário
+  useEffect(() => {
+     if (formData.startDate && formData.endDate && !isIndefinite) {
+         try {
+             const start = parseISO(formData.startDate);
+             const end = parseISO(formData.endDate);
+             if (start <= end) {
+                 const days = eachDayOfInterval({ start, end });
+                 const allowed = formData.workingDays || [0,1,2,3,4,5,6];
+                 const count = days.filter(d => allowed.includes(getDay(d))).length;
+                 const final = Math.max(0, count - (formData.manualDeductionDays || 0));
+                 setPreviewTotalDays(final);
+             } else {
+                 setPreviewTotalDays(0);
+             }
+         } catch (e) {
+             setPreviewTotalDays(0);
+         }
+     } else {
+         setPreviewTotalDays(0);
+     }
+  }, [formData.startDate, formData.endDate, formData.workingDays, formData.manualDeductionDays, isIndefinite]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,6 +104,8 @@ const Financial: React.FC = () => {
           endDate: contract.endDate,
           dailyRate: contract.dailyRate,
           monthlyRate: contract.monthlyRate,
+          workingDays: contract.workingDays || [0,1,2,3,4,5,6],
+          manualDeductionDays: contract.manualDeductionDays || 0
       });
 
       if (contract.demobilization) {
@@ -98,6 +127,25 @@ const Financial: React.FC = () => {
     setIsIndefinite(false);
     setEditingId(null);
   }
+
+  const toggleDay = (dayIndex: number) => {
+      const current = formData.workingDays || [];
+      if (current.includes(dayIndex)) {
+          setFormData({ ...formData, workingDays: current.filter(d => d !== dayIndex) });
+      } else {
+          setFormData({ ...formData, workingDays: [...current, dayIndex] });
+      }
+  };
+
+  const weekDays = [
+      { idx: 1, label: 'S' }, // Seg
+      { idx: 2, label: 'T' },
+      { idx: 3, label: 'Q' },
+      { idx: 4, label: 'Q' },
+      { idx: 5, label: 'S' },
+      { idx: 6, label: 'S' }, // Sab
+      { idx: 0, label: 'D' }, // Dom
+  ];
 
   return (
     <div className="space-y-6">
@@ -152,7 +200,6 @@ const Financial: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-sm">
                             <div className="flex flex-col text-xs text-slate-600">
-                                {/* Usando formatDateDisplay para evitar erro de timezone */}
                                 <span>Início: {formatDateDisplay(c.startDate)}</span>
                                 {c.endDate ? (
                                     <span>Fim: {formatDateDisplay(c.endDate)}</span>
@@ -234,6 +281,35 @@ const Financial: React.FC = () => {
                         {vehicles.filter(v => v.isActive && (v.status !== 'Em Manutenção' || v.id === formData.vehicleId)).map(v => <option key={v.id} value={v.id}>{v.code} - {v.model}</option>)}
                     </select>
                 </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        Dias de Faturamento (Seleção Manual)
+                        <div className="group relative">
+                             <Info className="w-4 h-4 text-slate-400 cursor-help" />
+                             <div className="absolute bottom-full mb-2 hidden group-hover:block w-48 bg-slate-800 text-white text-xs p-2 rounded z-10">
+                                 Selecione apenas os dias da semana que serão cobrados. Ex: Desmarque Domingo.
+                             </div>
+                        </div>
+                    </label>
+                    <div className="flex gap-2 justify-between">
+                        {weekDays.map(day => (
+                            <button
+                                key={day.idx}
+                                type="button"
+                                onClick={() => toggleDay(day.idx)}
+                                className={`w-10 h-10 rounded-lg text-sm font-bold transition-all ${
+                                    formData.workingDays?.includes(day.idx) 
+                                    ? 'bg-brand-600 text-white shadow-md' 
+                                    : 'bg-white text-slate-400 border border-slate-200'
+                                }`}
+                            >
+                                {day.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                      <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Contrato</label>
@@ -265,10 +341,22 @@ const Financial: React.FC = () => {
                     </div>
                     
                     {!isIndefinite && (
-                        <div className="animate-in fade-in duration-300">
-                             <label className="block text-xs font-medium text-slate-500 mb-1">Data de Término / Finalização</label>
-                             <input type="date" required={!isIndefinite} className="w-full border-slate-300 rounded-lg p-2 focus:ring-brand-500 focus:border-brand-500 text-sm" value={formData.endDate || ''} onChange={e => setFormData({...formData, endDate: e.target.value})} />
-                             <p className="text-xs text-amber-600 mt-1">Ao definir esta data, o status do veículo mudará para PARADO automaticamente.</p>
+                        <div className="space-y-3 animate-in fade-in duration-300">
+                             <div>
+                                 <label className="block text-xs font-medium text-slate-500 mb-1">Data de Término / Finalização</label>
+                                 <input type="date" required={!isIndefinite} className="w-full border-slate-300 rounded-lg p-2 focus:ring-brand-500 focus:border-brand-500 text-sm" value={formData.endDate || ''} onChange={e => setFormData({...formData, endDate: e.target.value})} />
+                             </div>
+                             
+                             <div className="flex gap-4 items-center">
+                                 <div className="flex-1">
+                                     <label className="block text-xs font-medium text-slate-500 mb-1">Subtrair Dias (Feriados/Chuva)</label>
+                                     <input type="number" min="0" className="w-full border-slate-300 rounded-lg p-2 text-sm" value={formData.manualDeductionDays} onChange={e => setFormData({...formData, manualDeductionDays: parseFloat(e.target.value) || 0})} />
+                                 </div>
+                                 <div className="flex-1 bg-white p-2 rounded border border-slate-200">
+                                     <span className="block text-xs text-slate-400">Total Dias Faturáveis</span>
+                                     <span className="block text-lg font-bold text-brand-600">{previewTotalDays} dias</span>
+                                 </div>
+                             </div>
                         </div>
                     )}
                 </div>
@@ -300,7 +388,7 @@ const Financial: React.FC = () => {
                     <div>
                          <label className="block text-sm font-medium text-slate-700 mb-1">Valor Mensal (R$)</label>
                          <input type="number" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.monthlyRate} onChange={e => setFormData({...formData, monthlyRate: parseFloat(e.target.value)})} />
-                         <p className="text-xs text-slate-400 mt-1">O cálculo será proporcional aos dias do mês.</p>
+                         <p className="text-xs text-slate-400 mt-1">O cálculo será proporcional aos dias úteis do mês.</p>
                     </div>
                 ) : (
                     <div>
