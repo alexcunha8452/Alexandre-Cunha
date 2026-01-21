@@ -93,6 +93,12 @@ export interface DemobilizationData {
   totalValue: number;
 }
 
+export interface ExtraHoursData {
+    amount0: number;   // Quantidade de horas a 0% (Hora normal adicional)
+    amount30: number;  // Quantidade de horas a 30%
+    amount100: number; // Quantidade de horas a 100%
+}
+
 export interface Contract {
   id: string;
   clientName: string;
@@ -101,7 +107,7 @@ export interface Contract {
   startDate: string;
   endDate?: string; // If undefined, it is "Em Andamento"
   dailyRate: number;
-  monthlyRate: number;
+  monthlyRate: number; // Mantido para compatibilidade, mas o cálculo principal usará dailyRate
   
   // Configuração de Dias de Faturamento
   workingDays: number[]; // Array de 0 a 6 (0=Domingo, 1=Segunda...) -> Padrão base
@@ -110,7 +116,11 @@ export interface Contract {
   excludedDates: string[]; // Dias que cairiam no workingDays mas não foram trabalhados (ex: Feriado Terça)
   includedDates: string[]; // Dias que NÃO cairiam no workingDays mas foram trabalhados (ex: Domingo específico)
 
-  manualDeductionDays: number; // Quantidade de dias a subtrair (Legado/Extra)
+  manualDeductionDays: number; // Deprecated em favor do calendario visual, mas mantido
+
+  // Extra Hours Configuration
+  hoursPerDay: number; // Para calcular valor da hora (Ex: 8h, 9h)
+  extraHours: ExtraHoursData;
 
   // New Demobilization Fields
   demobilization?: DemobilizationData;

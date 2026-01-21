@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Contract, ContractType } from '../types';
 import { calculateContractRevenue } from '../utils/calculations';
-import { Plus, CheckCircle, XCircle, DollarSign, Calendar as CalendarIcon, RefreshCcw, Truck, Edit, Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, DollarSign, Calendar as CalendarIcon, RefreshCcw, Truck, Edit, Info, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { startOfMonth, endOfMonth, format, eachDayOfInterval, parseISO, getDay, addMonths, subMonths, isSameMonth, isSameDay, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -27,6 +27,12 @@ const Financial: React.FC = () => {
     manualDeductionDays: 0,
     excludedDates: [],
     includedDates: [],
+    hoursPerDay: 8, // Padrão 8 horas
+    extraHours: {
+        amount0: 0,
+        amount30: 0,
+        amount100: 0
+    },
     demobilization: {
         distance: 0,
         pricePerKm: 0,
@@ -87,7 +93,9 @@ const Financial: React.FC = () => {
           workingDays: contract.workingDays || [0,1,2,3,4,5,6],
           manualDeductionDays: contract.manualDeductionDays || 0,
           excludedDates: contract.excludedDates || [],
-          includedDates: contract.includedDates || []
+          includedDates: contract.includedDates || [],
+          hoursPerDay: contract.hoursPerDay || 8,
+          extraHours: contract.extraHours || { amount0: 0, amount30: 0, amount100: 0 }
       });
 
       if (contract.demobilization) {
@@ -222,12 +230,15 @@ const Financial: React.FC = () => {
 
   const weekDaysLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
+  // Helper para cálculo do valor da hora na UI
+  const estimatedHourlyRate = (formData.dailyRate || 0) / (formData.hoursPerDay || 8);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
            <h1 className="text-2xl font-bold text-slate-800">Gestão Financeira</h1>
-           <p className="text-slate-500 text-sm">Contratos, renovações e previsão de faturamento mensal.</p>
+           <p className="text-slate-500 text-sm">Contratos Mensais (Base Diária) e Diárias Avulsas.</p>
         </div>
         <button 
           onClick={() => { resetForm(); setIsModalOpen(true); }}
@@ -285,24 +296,18 @@ const Financial: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-sm font-medium text-slate-700">
                             <div>
-                                {c.type === ContractType.MENSAL ? (
-                                    <span>R$ {c.monthlyRate.toLocaleString()}/mês</span>
-                                ) : (
-                                    <span>R$ {c.dailyRate.toLocaleString()}/dia</span>
-                                )}
+                                <span>R$ {c.dailyRate.toLocaleString()}/dia</span>
                             </div>
-                            {c.demobilization && c.demobilization.totalValue > 0 && (
-                                <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                    <Truck className="w-3 h-3"/> Desmob: R$ {c.demobilization.totalValue.toLocaleString()}
-                                </div>
-                            )}
+                            <div className="text-[10px] text-slate-400 mt-1">
+                                {(c.extraHours?.amount0 || 0) + (c.extraHours?.amount30 || 0) + (c.extraHours?.amount100 || 0)}h Extras
+                            </div>
                         </td>
                         <td className="px-6 py-4">
                             <div className="flex items-center gap-1 text-green-700 font-bold bg-green-50 px-2 py-1 rounded-md w-fit text-sm border border-green-100">
                                 <DollarSign className="w-3 h-3" />
                                 {currentRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
-                            <p className="text-[10px] text-slate-400 mt-1">Acumulado até hoje</p>
+                            <p className="text-[10px] text-slate-400 mt-1">Calculado até hoje</p>
                         </td>
                         <td className="px-6 py-4">
                             {c.status === 'Active' ? (
@@ -367,18 +372,90 @@ const Financial: React.FC = () => {
                     <div>
                          <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Contrato</label>
                          <select className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500 bg-white" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as ContractType})}>
-                             <option value={ContractType.MENSAL}>Mensal</option>
-                             <option value={ContractType.DIARIA}>Diária</option>
+                             <option value={ContractType.MENSAL}>Mensal (Pacote)</option>
+                             <option value={ContractType.DIARIA}>Diária (Avulsa)</option>
                          </select>
                      </div>
+                </div>
+
+                {/* Rates & Hours - NEW */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                        <DollarSign className="w-4 h-4" /> Valores & Horários
+                    </h3>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Valor Diária (R$)</label>
+                            <input type="number" className="w-full border-slate-300 rounded-lg p-2" value={formData.dailyRate} onChange={e => setFormData({...formData, dailyRate: parseFloat(e.target.value) || 0})} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-slate-500 mb-1">Carga Horária (h/dia)</label>
+                            <input type="number" min="1" max="24" className="w-full border-slate-300 rounded-lg p-2" value={formData.hoursPerDay} onChange={e => setFormData({...formData, hoursPerDay: parseFloat(e.target.value) || 8})} />
+                        </div>
+                    </div>
+                    <div className="mt-2 text-right text-xs text-slate-500 italic border-t border-slate-200 pt-2">
+                        Valor Hora Base: <span className="font-bold text-slate-700">R$ {estimatedHourlyRate.toLocaleString(undefined, {maximumFractionDigits: 2})}</span>
+                    </div>
+
+                    {/* Extra Hours */}
+                    <div className="mt-4">
+                        <label className="block text-xs font-bold text-slate-700 mb-2">Horas Extras (Quantidade Total)</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            <div>
+                                <span className="block text-[10px] text-slate-500 mb-1">Normal (0%)</span>
+                                <input 
+                                    type="number" 
+                                    min="0"
+                                    className="w-full border-slate-300 rounded-lg p-1.5 text-sm" 
+                                    placeholder="0h"
+                                    value={formData.extraHours?.amount0 || ''}
+                                    onChange={e => setFormData({
+                                        ...formData, 
+                                        extraHours: { ...formData.extraHours!, amount0: parseFloat(e.target.value) || 0 }
+                                    })}
+                                />
+                            </div>
+                            <div>
+                                <span className="block text-[10px] text-slate-500 mb-1">Extra 30%</span>
+                                <input 
+                                    type="number" 
+                                    min="0"
+                                    className="w-full border-slate-300 rounded-lg p-1.5 text-sm" 
+                                    placeholder="0h"
+                                    value={formData.extraHours?.amount30 || ''}
+                                    onChange={e => setFormData({
+                                        ...formData, 
+                                        extraHours: { ...formData.extraHours!, amount30: parseFloat(e.target.value) || 0 }
+                                    })}
+                                />
+                            </div>
+                            <div>
+                                <span className="block text-[10px] text-slate-500 mb-1">Extra 100%</span>
+                                <input 
+                                    type="number" 
+                                    min="0"
+                                    className="w-full border-slate-300 rounded-lg p-1.5 text-sm" 
+                                    placeholder="0h"
+                                    value={formData.extraHours?.amount100 || ''}
+                                    onChange={e => setFormData({
+                                        ...formData, 
+                                        extraHours: { ...formData.extraHours!, amount100: parseFloat(e.target.value) || 0 }
+                                    })}
+                                />
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Calendar & Working Days */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                     <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                        Calendário de Trabalho
+                        Calendário (Dias Trabalhados)
                         <Info className="w-4 h-4 text-slate-400" />
                     </label>
+                    <p className="text-xs text-slate-500 mb-3">
+                        O sistema calcula automaticamente do início até hoje. Clique nos dias para marcar faltas ou trabalhos extras.
+                    </p>
                     
                     {/* Pattern Selector */}
                     <div className="flex gap-1 justify-between mb-4">
@@ -415,7 +492,7 @@ const Financial: React.FC = () => {
                          <div className="mt-2 flex gap-3 text-[10px] justify-center text-slate-500">
                              <span className="flex items-center gap-1"><div className="w-2 h-2 bg-brand-50 border border-brand-200"></div> Padrão</span>
                              <span className="flex items-center gap-1"><div className="w-2 h-2 bg-green-600"></div> Extra/Incluído</span>
-                             <span className="flex items-center gap-1"><div className="w-2 h-2 bg-red-100 decoration-red-500 line-through text-red-400">X</div> Feriado/Excluído</span>
+                             <span className="flex items-center gap-1"><div className="w-2 h-2 bg-red-100 decoration-red-500 line-through text-red-400">X</div> Falta/Excluído</span>
                          </div>
                     </div>
                 </div>
@@ -462,21 +539,6 @@ const Financial: React.FC = () => {
                     </div>
                 </div>
 
-                <hr className="border-slate-100"/>
-
-                {formData.type === ContractType.MENSAL ? (
-                    <div>
-                         <label className="block text-sm font-medium text-slate-700 mb-1">Valor Mensal (R$)</label>
-                         <input type="number" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.monthlyRate} onChange={e => setFormData({...formData, monthlyRate: parseFloat(e.target.value)})} />
-                         <p className="text-xs text-slate-400 mt-1">O cálculo será acumulativo com base nos dias corridos até hoje.</p>
-                    </div>
-                ) : (
-                    <div>
-                         <label className="block text-sm font-medium text-slate-700 mb-1">Valor Diária (R$)</label>
-                         <input type="number" className="w-full border-slate-300 rounded-lg p-2.5 focus:ring-brand-500 focus:border-brand-500" value={formData.dailyRate} onChange={e => setFormData({...formData, dailyRate: parseFloat(e.target.value)})} />
-                    </div>
-                )}
-                
                 <div className="pt-4 flex justify-end gap-3 border-t border-slate-100 mt-4 sticky bottom-0 bg-white z-10">
                     <button type="button" onClick={() => setIsModalOpen(false)} className="px-5 py-2.5 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors">Cancelar</button>
                     <button type="submit" className="px-5 py-2.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 font-medium shadow-md transition-colors">
