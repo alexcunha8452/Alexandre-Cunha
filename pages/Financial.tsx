@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Contract, ContractType } from '../types';
 import { calculateContractRevenue } from '../utils/calculations';
-import { Plus, CheckCircle, XCircle, DollarSign, Calendar as CalendarIcon, RefreshCcw, Truck, Edit, Info, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, DollarSign, Calendar as CalendarIcon, RefreshCcw, Truck, Edit, Info, ChevronLeft, ChevronRight, Clock, Filter } from 'lucide-react';
 import { startOfMonth, endOfMonth, format, eachDayOfInterval, parseISO, getDay, addMonths, subMonths, isSameMonth, isSameDay, startOfWeek, endOfWeek, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -13,8 +13,13 @@ const Financial: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isIndefinite, setIsIndefinite] = useState(false);
 
-  // Revenue Simulation for Current Month
-  const currentMonth = new Date();
+  // --- SELETOR DE MÊS / COMPETÊNCIA ---
+  const [selectedMonthStr, setSelectedMonthStr] = useState(format(new Date(), 'yyyy-MM'));
+  
+  // Converte a string YYYY-MM para datas de início e fim
+  const viewDate = parseISO(selectedMonthStr + '-01'); // Dia 1 do mês selecionado
+  const viewStart = startOfMonth(viewDate);
+  const viewEnd = endOfMonth(viewDate);
   
   const initialFormState: Partial<Contract> = {
     clientName: '', 
@@ -240,12 +245,27 @@ const Financial: React.FC = () => {
            <h1 className="text-2xl font-bold text-slate-800">Gestão Financeira</h1>
            <p className="text-slate-500 text-sm">Contratos Mensais (Base Diária) e Diárias Avulsas.</p>
         </div>
-        <button 
-          onClick={() => { resetForm(); setIsModalOpen(true); }}
-          className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-all"
-        >
-          <Plus className="w-4 h-4" /> Novo Contrato
-        </button>
+        
+        <div className="flex gap-4 items-center">
+             {/* Filtro de Mês */}
+            <div className="flex items-center space-x-2 bg-white p-2 rounded-lg border border-slate-300 shadow-sm">
+                <CalendarIcon className="w-4 h-4 text-slate-500" />
+                <span className="text-xs font-bold text-slate-500 uppercase">Mês Ref:</span>
+                <input 
+                    type="month" 
+                    value={selectedMonthStr}
+                    onChange={(e) => setSelectedMonthStr(e.target.value)}
+                    className="text-sm border-none focus:ring-0 text-slate-800 bg-transparent outline-none cursor-pointer font-bold"
+                />
+            </div>
+
+            <button 
+            onClick={() => { resetForm(); setIsModalOpen(true); }}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-all"
+            >
+            <Plus className="w-4 h-4" /> Novo Contrato
+            </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -255,9 +275,11 @@ const Financial: React.FC = () => {
                 <tr>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cliente / Veículo</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Tipo</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Período</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Valores</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Receita (Mês Atual)</th>
+                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Período Contrato</th>
+                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Valores Base</th>
+                    <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-green-50/50">
+                        Receita ({format(viewDate, 'MMM/yyyy', { locale: ptBR })})
+                    </th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Ações</th>
                 </tr>
@@ -272,7 +294,9 @@ const Financial: React.FC = () => {
                 )}
                 {contracts.map(c => {
                 const v = vehicles.find(veh => veh.id === c.vehicleId);
-                const currentRevenue = calculateContractRevenue(c, startOfMonth(currentMonth), endOfMonth(currentMonth));
+                // Calcula com base no mês selecionado no filtro (viewStart a viewEnd)
+                const monthRevenue = calculateContractRevenue(c, viewStart, viewEnd);
+                
                 return (
                     <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4">
@@ -302,12 +326,17 @@ const Financial: React.FC = () => {
                                 {(c.extraHours?.amount0 || 0) + (c.extraHours?.amount30 || 0) + (c.extraHours?.amount100 || 0)}h Extras
                             </div>
                         </td>
-                        <td className="px-6 py-4">
-                            <div className="flex items-center gap-1 text-green-700 font-bold bg-green-50 px-2 py-1 rounded-md w-fit text-sm border border-green-100">
+                        <td className="px-6 py-4 bg-green-50/30">
+                            <div className="flex items-center gap-1 text-green-700 font-bold bg-green-100 px-2 py-1 rounded-md w-fit text-sm border border-green-200 shadow-sm">
                                 <DollarSign className="w-3 h-3" />
-                                {currentRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {monthRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </div>
-                            <p className="text-[10px] text-slate-400 mt-1">Calculado até hoje</p>
+                            {/* Dica visual sobre o cálculo */}
+                            {isSameMonth(viewDate, new Date()) ? (
+                                <p className="text-[10px] text-slate-500 mt-1 italic">Realizado até hoje</p>
+                            ) : (
+                                <p className="text-[10px] text-slate-500 mt-1 italic">Fechamento do mês</p>
+                            )}
                         </td>
                         <td className="px-6 py-4">
                             {c.status === 'Active' ? (

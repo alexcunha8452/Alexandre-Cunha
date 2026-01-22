@@ -1,7 +1,8 @@
+
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  LayoutDashboard, Truck, Wrench, Droplets, DollarSign, FileText, Menu, X, Settings 
+  LayoutDashboard, Truck, Wrench, Droplets, DollarSign, FileText, Menu, X, Settings, ClipboardCheck 
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -15,6 +16,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Truck, label: 'Veículos', path: '/veiculos' },
+    { icon: ClipboardCheck, label: 'Checklist', path: '/checklist' },
     { icon: Wrench, label: 'Manutenção', path: '/manutencao' },
     { icon: Droplets, label: 'Combustível/Despesas', path: '/despesas' },
     { icon: DollarSign, label: 'Financeiro', path: '/financeiro' },

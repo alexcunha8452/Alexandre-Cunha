@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
@@ -8,6 +9,7 @@ import Maintenance from './pages/Maintenance';
 import Financial from './pages/Financial';
 import Expenses from './pages/Expenses';
 import Reports from './pages/Reports';
+import ChecklistPage from './pages/Checklist';
 
 const App: React.FC = () => {
   return (
@@ -17,6 +19,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/veiculos" element={<Vehicles />} />
+            <Route path="/checklist" element={<ChecklistPage />} />
             <Route path="/manutencao" element={<Maintenance />} />
             <Route path="/financeiro" element={<Financial />} />
             <Route path="/despesas" element={<Expenses />} />

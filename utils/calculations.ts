@@ -1,6 +1,6 @@
 
 import { Contract, ContractType, Maintenance, FuelEntry, GeneralExpense } from '../types';
-import { differenceInDays, getDaysInMonth, isWithinInterval, parseISO, max, min, isAfter, eachDayOfInterval, getDay, format, startOfDay, endOfDay } from 'date-fns';
+import { differenceInDays, getDaysInMonth, isWithinInterval, parseISO, max, min, isAfter, eachDayOfInterval, getDay, format, startOfDay, endOfDay, isSameMonth } from 'date-fns';
 
 /**
  * Calculates revenue for a specific contract within a target period.
@@ -13,13 +13,20 @@ export const calculateContractRevenue = (contract: Contract, periodStart: Date, 
   const contractEndRaw = contract.endDate ? parseISO(contract.endDate) : null;
   const today = endOfDay(new Date()); 
   
-  // O fim efetivo do cálculo é o menor valor entre: Fim do Período, Fim do Contrato ou Hoje (se for futuro)
+  // O fim efetivo do cálculo depende se estamos olhando para o passado ou presente.
+  // Se o periodEnd é no passado (mês anterior), calculamos até o fim daquele período.
+  // Se o periodEnd é futuro ou hoje, limitamos a hoje para não projetar receitas não realizadas,
+  // A MENOS que o contrato já tenha acabado antes de hoje.
+  
   let effectiveEndCalc = periodEnd;
   
-  if (isAfter(periodEnd, today)) {
+  // Se estamos no mês atual ou futuro, limitamos ao 'hoje' para mostrar o realizado.
+  if (isAfter(periodEnd, today) || isSameMonth(periodEnd, today)) {
       effectiveEndCalc = min([periodEnd, today]);
   }
-  
+  // Se estamos num mês passado, periodEnd (que é o fim daquele mês) permanece como o teto.
+
+  // Se o contrato tem data fim, respeitamos ela.
   if (contractEndRaw) {
       effectiveEndCalc = min([effectiveEndCalc, contractEndRaw]);
   }
@@ -35,58 +42,68 @@ export const calculateContractRevenue = (contract: Contract, periodStart: Date, 
   let revenue = 0;
   let billableDaysCount = 0;
 
-  // Gerar todos os dias no intervalo efetivo
-  const daysInterval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
-  
-  // Configurações do Contrato
-  const baseAllowedDays = contract.workingDays || [0, 1, 2, 3, 4, 5, 6];
-  const excludedSet = new Set(contract.excludedDates || []);
-  const includedSet = new Set(contract.includedDates || []);
+  try {
+      // Gerar todos os dias no intervalo efetivo
+      const daysInterval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
+      
+      // Configurações do Contrato
+      const baseAllowedDays = contract.workingDays || [0, 1, 2, 3, 4, 5, 6];
+      const excludedSet = new Set(contract.excludedDates || []);
+      const includedSet = new Set(contract.includedDates || []);
 
-  daysInterval.forEach(day => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      const dayOfWeek = getDay(day);
+      daysInterval.forEach(day => {
+          const dateStr = format(day, 'yyyy-MM-dd');
+          const dayOfWeek = getDay(day);
 
-      let isBillable = false;
+          let isBillable = false;
 
-      // 1. Verifica inclusão manual (Prioridade máxima)
-      if (includedSet.has(dateStr)) {
-          isBillable = true;
-      } 
-      // 2. Verifica exclusão manual (Se não incluído manualmente, verifica se foi excluído)
-      else if (excludedSet.has(dateStr)) {
-          isBillable = false;
-      }
-      // 3. Aplica regra base (Dias da semana padrão)
-      else if (baseAllowedDays.includes(dayOfWeek)) {
-          isBillable = true;
-      }
+          // 1. Verifica inclusão manual (Prioridade máxima)
+          if (includedSet.has(dateStr)) {
+              isBillable = true;
+          } 
+          // 2. Verifica exclusão manual (Se não incluído manualmente, verifica se foi excluído)
+          else if (excludedSet.has(dateStr)) {
+              isBillable = false;
+          }
+          // 3. Aplica regra base (Dias da semana padrão)
+          else if (baseAllowedDays.includes(dayOfWeek)) {
+              isBillable = true;
+          }
 
-      if (isBillable) {
-          billableDaysCount++;
-      }
-  });
+          if (isBillable) {
+              billableDaysCount++;
+          }
+      });
+  } catch (error) {
+      // Fallback para evitar crash em datas inválidas
+      return 0;
+  }
 
   // --- CÁLCULO FINANCEIRO BASE ---
   // Agora tanto Diária quanto Mensal usam a Diária como base multiplicadora pelos dias reais
   revenue = billableDaysCount * contract.dailyRate;
 
   // --- CÁLCULO DE HORAS EXTRAS ---
-  // As horas extras são somadas se estiverem dentro do período do contrato
-  // Como as horas extras no objeto são "acumuladas" do contrato, vamos assumir que elas pertencem ao período total.
-  // Se quisermos ser precisos por mês, teríamos que ter um log de horas extras por data.
-  // Pela simplicidade solicitada, vamos adicionar o valor total das horas extras se o contrato estiver ativo neste período.
-  // Para evitar duplicar o valor em visualizações de múltiplos meses, o ideal seria ratear, 
-  // mas aqui vamos somar ao total acumulado "até hoje".
+  // As horas extras são globais no objeto do contrato.
+  // Para visualização mensal correta, o ideal seria que horas extras fossem lançadas por dia.
+  // Como o requisito atual é um campo acumulador simples no contrato:
+  // Se estivermos visualizando o mês atual (ou acumulado geral), somamos as horas extras.
+  // Se estivermos visualizando um mês passado onde o contrato estava ativo, somamos também?
+  // Isso gera um problema de duplicação visual se somarmos o total "do contrato" em todos os meses.
+  // Pela simplicidade pedida, somaremos as horas extras APENAS se o mês selecionado for o ATUAL
+  // OU se o contrato terminou DENTRO do mês selecionado (fechamento).
   
-  if (contract.extraHours && contract.dailyRate > 0) {
+  const isCurrentMonth = isSameMonth(periodEnd, today);
+  const contractEndsInThisPeriod = contractEndRaw && isWithinInterval(contractEndRaw, { start: periodStart, end: periodEnd });
+  
+  if ((isCurrentMonth || contractEndsInThisPeriod) && contract.extraHours && contract.dailyRate > 0) {
       // Calcular valor da hora
       const hoursPerDay = contract.hoursPerDay || 8; // Default 8h se não definido
       const hourlyRate = contract.dailyRate / hoursPerDay;
 
-      const cost0 = (contract.extraHours.amount0 || 0) * hourlyRate * 1.0; // 0% extra = 100% da hora (hora normal)
-      const cost30 = (contract.extraHours.amount30 || 0) * hourlyRate * 1.30; // +30%
-      const cost100 = (contract.extraHours.amount100 || 0) * hourlyRate * 2.0; // +100% (Dobro)
+      const cost0 = (contract.extraHours.amount0 || 0) * hourlyRate * 1.0; 
+      const cost30 = (contract.extraHours.amount30 || 0) * hourlyRate * 1.30;
+      const cost100 = (contract.extraHours.amount100 || 0) * hourlyRate * 2.0;
 
       revenue += (cost0 + cost30 + cost100);
   }

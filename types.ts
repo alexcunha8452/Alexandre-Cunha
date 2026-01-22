@@ -128,6 +128,23 @@ export interface Contract {
   status: 'Active' | 'Finished';
 }
 
+export interface ChecklistItem {
+    id: string;
+    name: string; // "Cintas", "Anilhas", etc
+    isChecked: boolean; // Presente/Ok
+    condition: 'Bom' | 'Ruim' | 'Ausente';
+    observation: string;
+}
+
+export interface Checklist {
+    id: string;
+    vehicleId: string;
+    date: string;
+    responsible: string;
+    items: ChecklistItem[];
+    generalObservation: string;
+}
+
 export interface FinancialSummary {
   revenue: number;
   expenses: number;

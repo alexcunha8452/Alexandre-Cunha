@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { 
-  Vehicle, Maintenance, FuelEntry, GeneralExpense, Contract, 
+  Vehicle, Maintenance, FuelEntry, GeneralExpense, Contract, Checklist,
   VehicleType, VehicleStatus, MaintenanceType 
 } from '../types';
 
@@ -13,6 +13,7 @@ interface AppContextType {
   fuels: FuelEntry[];
   expenses: GeneralExpense[];
   contracts: Contract[];
+  checklists: Checklist[];
   
   // Actions
   addVehicle: (v: Omit<Vehicle, 'id' | 'isActive'>) => void;
@@ -31,6 +32,9 @@ interface AppContextType {
   addContract: (c: Omit<Contract, 'id' | 'status'>) => void;
   updateContract: (id: string, data: Partial<Contract>) => void;
   deleteContract: (id: string) => void;
+
+  addChecklist: (c: Omit<Checklist, 'id'>) => void;
+  deleteChecklist: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -128,6 +132,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [fuels, setFuels] = useState<FuelEntry[]>(() => getLocalStorage('fuels', []));
   const [expenses, setExpenses] = useState<GeneralExpense[]>(() => getLocalStorage('expenses', []));
   const [contracts, setContracts] = useState<Contract[]>(() => getLocalStorage('contracts', []));
+  const [checklists, setChecklists] = useState<Checklist[]>(() => getLocalStorage('checklists', []));
 
   // --- Effects to Save Changes ---
   useEffect(() => setLocalStorage('vehicles', vehicles), [vehicles]);
@@ -135,6 +140,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => setLocalStorage('fuels', fuels), [fuels]);
   useEffect(() => setLocalStorage('expenses', expenses), [expenses]);
   useEffect(() => setLocalStorage('contracts', contracts), [contracts]);
+  useEffect(() => setLocalStorage('checklists', checklists), [checklists]);
 
   // --- Actions ---
 
@@ -223,19 +229,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteContract = (id: string) => {
-    // Antes de deletar, talvez devêssemos liberar o veículo? 
-    // Por segurança, vamos apenas deletar o registro histórico. O usuário gerencia o status do veículo manualmente se precisar.
     setContracts(prev => prev.filter(c => c.id !== id));
+  };
+
+  const addChecklist = (data: Omit<Checklist, 'id'>) => {
+      setChecklists(prev => [...prev, { ...data, id: generateId() }]);
+  };
+
+  const deleteChecklist = (id: string) => {
+      setChecklists(prev => prev.filter(c => c.id !== id));
   };
 
   return (
     <AppContext.Provider value={{
-      vehicles, maintenances, fuels, expenses, contracts,
+      vehicles, maintenances, fuels, expenses, contracts, checklists,
       addVehicle, updateVehicle, deleteVehicle,
       addMaintenance, deleteMaintenance,
       addFuel, deleteFuel,
       addExpense, deleteExpense,
-      addContract, updateContract, deleteContract
+      addContract, updateContract, deleteContract,
+      addChecklist, deleteChecklist
     }}>
       {children}
     </AppContext.Provider>
